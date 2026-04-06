@@ -6,27 +6,16 @@ export const I18nProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check IP location for automatic language setting
-    const checkLocation = async () => {
-      try {
-        const response = await fetch('https://ipapi.co/json/');
-        const data = await response.json();
-        if (data.country === 'KR') {
-          setLang('ko');
-        } else {
-          setLang('en');
-        }
-      } catch (error) {
-        console.error('Failed to detect location', error);
-        // Fallback to browser language
-        if (navigator.language.startsWith('ko')) {
-          setLang('ko');
-        }
-      } finally {
-        setLoading(false);
+    // Browser language detection
+    const detectLanguage = () => {
+      if (navigator.language.startsWith('ko')) {
+        setLang('ko');
+      } else {
+        setLang('en');
       }
+      setLoading(false);
     };
-    checkLocation();
+    detectLanguage();
   }, []);
 
   const t = (key, params = {}) => {

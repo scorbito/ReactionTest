@@ -55,6 +55,14 @@ export const translations = {
     fullRanking: '전체 글로벌 랭킹',
     fullRankingSubtitle: '전 세계 플레이어들과 반응속도를 겨뤄보세요',
     close: '닫기',
+    tab_all: '전체',
+    tab_mobile: '모바일',
+    tab_desktop: '데스크탑',
+    shareResult: '이미지로 공유하기',
+    anonymous: '익명 사용자',
+    shareTitle: '내 반응속도 기록',
+    shareDesc: '반응속도 {ms}ms · 전국 {rank}위 · 상위 {percentile}%\n지금 바로 도전해보세요! 👇',
+    channelName: '대단부자',
     tiers: {
       t0: ["평범하지만 괜찮아요", "연습하면 늘어요", "한 번 더 해봐요"],
       t1: ["평균은 넘었어요", "나쁘지 않은데요?", "조금만 더 집중해요", "꽤 안정적이에요"],
@@ -116,6 +124,14 @@ export const translations = {
     fullRanking: 'Global Leaderboard',
     fullRankingSubtitle: 'Challenge players from around the world',
     close: 'Close',
+    tab_all: 'All',
+    tab_mobile: 'Mobile',
+    tab_desktop: 'Desktop',
+    shareResult: 'Share Result',
+    anonymous: 'Anonymous',
+    shareTitle: 'My Reaction Time',
+    shareDesc: 'Reaction: {ms}ms · Rank: #{rank} · Top {percentile}%\nTry it now! 👇',
+    channelName: 'Daedan Buja',
     tiers: {
       t0: ["Not bad", "Keep going", "Try again"],
       t1: ["Good!", "Nice one", "Getting there", "Solid!"],
@@ -124,6 +140,7 @@ export const translations = {
       t4: ["INSANE!!", "Superhuman", "What the—", "Godlike", "Pro gamer mode"],
       t5: ["Wait... really?", "No way", "Lucky shot?", "Are you a robot?", "Hacked."]
     }
+
   }
 };
 

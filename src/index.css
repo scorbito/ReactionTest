@@ -285,14 +285,19 @@ body {
 .ranking-table {
   width: 100%;
   border-collapse: collapse;
-  text-align: left;
+  table-layout: fixed; /* 헤더-본문 정렬 고정을 위해 추가 */
 }
 
-.ranking-table th,
-.ranking-table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
+/* 3개 컬럼 리더보드 전용 너비 */
+.ranking-table:not(.full-ranking-table) .rank-col { width: 14%; text-align: center; }
+.ranking-table:not(.full-ranking-table) .name-col { width: 54%; text-align: left; }
+.ranking-table:not(.full-ranking-table) .score-col { width: 32%; text-align: right; }
+
+/* 4개 컬럼(전체 랭킹) 전용 너비 */
+.full-ranking-table .rank-col { width: 10%; text-align: center; }
+.full-ranking-table .name-col { width: 45%; text-align: left; }
+.full-ranking-table .device-col { width: 25%; text-align: center; color: #94a3b8; font-size: 0.9em; }
+.full-ranking-table .score-col { width: 20%; text-align: right; }
 
 .ranking-table th {
   position: sticky;
@@ -300,11 +305,93 @@ body {
   background: #1e293b;
   color: var(--secondary);
   font-weight: 600;
+  padding: 12px 10px;
+  z-index: 5;
 }
 
-.ranking-table tr.highlight {
-  background: rgba(59, 130, 246, 0.2);
-  border-left: 4px solid var(--primary);
+.ranking-table td {
+  padding: 14px 10px;
+  vertical-align: middle;
+}
+
+/* 이름+배지 한 줄 정렬 구조 */
+.name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* 20px -> 8px로 축소하여 이름과 밀착 */
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.player-name {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  font-weight: 500;
+}
+
+.ranking-table tr.highlight-best {
+  background: rgba(251, 191, 36, 0.12);
+  border-left: 4px solid #fbbf24;
+}
+
+.ranking-table tr.highlight-current {
+  background: rgba(34, 197, 94, 0.2); /* 배경색 소폭 강화로 가시성 확보 */
+  border-left: 4px solid #22c55e;
+  animation: row-pulse 2s infinite ease-in-out;
+}
+
+/* Badge Styles - 이름과의 간격 확보 */
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 900;
+  white-space: nowrap;
+  flex-shrink: 0; 
+  margin-left: 12px; /* 간격 더욱 확실히 확보 */
+}
+
+.badge-best {
+  background: #fbbf24;
+  color: #0f172a;
+}
+
+.badge-current {
+  background: #22c55e;
+  color: white;
+}
+
+/* Arrow Indicator - 크기 및 간격 정밀 계산 */
+.current-arrow {
+  color: #22c55e;
+  font-weight: bold;
+  animation: arrow-bounce 0.8s infinite alternate ease-in-out;
+  flex-shrink: 0;
+  margin-right: 8px; /* 16px -> 8px로 축소하여 밀착 */
+  min-width: 14px;    /* 크기도 적정 수준으로 조정 */
+  text-align: center;
+}
+
+/* Animations */
+@keyframes row-pulse {
+  0% { background: rgba(34, 197, 94, 0.15); }
+  50% { background: rgba(34, 197, 94, 0.3); }
+  100% { background: rgba(34, 197, 94, 0.15); }
+}
+
+@keyframes row-pulse-gold {
+  0% { background: rgba(251, 191, 36, 0.2); }
+  50% { background: rgba(251, 191, 36, 0.4); }
+  100% { background: rgba(251, 191, 36, 0.2); }
+}
+
+@keyframes arrow-bounce {
+  from { transform: translateX(0); }
+  to { transform: translateX(2px); }
 }
 
 .retry-btn {
@@ -1402,4 +1489,87 @@ body {
   .merge-actions {
     grid-template-columns: 1fr;
   }
+}
+
+/* --- Ranking Tabs & Sharing --- */
+.ranking-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.3rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 0.6rem;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.share-btn {
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.share-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+}
+
+.share-btn:active {
+  transform: translateY(0);
+}
+
+.share-btn svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+/* Skeleton Loading */
+.skeleton-row {
+  height: 48px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 4px;
+  margin: 8px 0;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }

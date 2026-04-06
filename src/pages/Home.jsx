@@ -19,6 +19,9 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { getRandomDelay } from '../utils/helpers';
 import EffectManager from '../components/EffectManager';
 import { playSound } from '../utils/AudioEngine';
+import html2canvas from 'html2canvas';
+import { getDeviceType } from '../utils/getDeviceType';
+import ShareCard from '../components/ShareCard';
 
 export default function Home() {
   const { t, lang } = useTranslation();
@@ -39,6 +42,12 @@ export default function Home() {
   const [fullRankingList, setFullRankingList] = useState([]);
   const [isLoadingFullRanking, setIsLoadingFullRanking] = useState(false);
   const [fullRankingTotal, setFullRankingTotal] = useState(0);
+  const [deviceTab, setDeviceTab] = useState('all'); // all, mobile, desktop
+  
+  // Sharing State
+  const shareCardRef = useRef(null);
+  const [isSharing, setIsSharing] = useState(false);
+  const currentRankRef = useRef(null);
 
   // Nickname Modal State
   const [showNicknameModal, setShowNicknameModal] = useState(false);
@@ -72,26 +81,39 @@ export default function Home() {
   }, [state]);
 
   // 전체 랭킹 데이터 페치 함수
-  const fetchFullRanking = React.useCallback(async () => {
+  const fetchFullRanking = React.useCallback(async (tab) => {
+    const currentTab = tab || deviceTab;
     setIsLoadingFullRanking(true);
+    setFullRankingList([]); // Clear previous list to avoid confusion
     try {
-      console.log('전체 랭킹 데이터를 불러오는 중...');
-      const q = query(collection(db, 'rankings'), orderBy('score', 'asc'), limit(100));
+      const baseColl = collection(db, 'rankings');
+      let q, countSnap;
+
+      if (currentTab === 'all') {
+        q = query(baseColl, orderBy('score', 'asc'), limit(100));
+        countSnap = await getCountFromServer(baseColl);
+      } else {
+        q = query(baseColl, where('device', '==', currentTab), orderBy('score', 'asc'), limit(100));
+        countSnap = await getCountFromServer(query(baseColl, where('device', '==', currentTab)));
+      }
+      
       const snap = await getDocs(q);
       const list = snap.docs.map(doc => doc.data());
       setFullRankingList(list);
-
-      // 전체 플레이어 수 가져오기
-      const totalColl = collection(db, 'rankings');
-      const totalCount = await getCountFromServer(totalColl);
-      setFullRankingTotal(totalCount.data().count);
-      console.log(`전체 랭킹 로드 완료: ${list.length}명 표시 / 전체 ${totalCount.data().count}명`);
+      setFullRankingTotal(countSnap.data().count);
     } catch (e) {
       console.error('전체 랭킹 로드 실패:', e);
     } finally {
       setIsLoadingFullRanking(false);
     }
-  }, []);
+  }, [deviceTab]);
+
+  // 탭 변경 시 데이터 다시 불러오기
+  useEffect(() => {
+    if (showFullRanking) {
+      fetchFullRanking(deviceTab);
+    }
+  }, [deviceTab, showFullRanking, fetchFullRanking]);
 
   // 전체 랭킹 페이지 열기
   const handleOpenFullRanking = React.useCallback(async (e) => {
@@ -153,15 +175,19 @@ export default function Home() {
         device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
       });
 
-      // 2. Global Ranking
-      const rankRef = doc(db, 'rankings', activeUser.uid);
+      if (!user) return;
+
+      const deviceType = getDeviceType();
+      const rankDocId = `${user.uid}_${deviceType}`;
+      const rankRef = doc(db, 'rankings', rankDocId);
       const rankSnap = await getDoc(rankRef);
-      
+
       if (!rankSnap.exists() || rankSnap.data().score > avgMs) {
         await setDoc(rankRef, {
-          uid: activeUser.uid,
-          displayName: activeUser.displayName || t('anonymous') || 'Anonymous',
+          uid: user.uid,
+          displayName: user.displayName || t('anonymous') || 'Anonymous',
           score: avgMs,
+          device: deviceType, // Add device to ranking doc
           updatedAt: serverTimestamp()
         });
       }
@@ -184,8 +210,8 @@ export default function Home() {
       setTotalPlayers(totalCount.data().count);
 
       if (currentAvg) {
-        const myEntry = activeUser ? list.find(e => e.uid === activeUser.uid) : null;
-        const scoreForRank = myEntry ? myEntry.score : currentAvg;
+        // 순위 계산은 방금 기록한 점수(currentAvg)를 기준으로 전국의 모든 기록과 비교
+        const scoreForRank = currentAvg;
         const rankQuery = query(collection(db, 'rankings'), where('score', '<', scoreForRank));
         const rankCount = await getCountFromServer(rankQuery);
         setMyRank(rankCount.data().count + 1);
@@ -219,22 +245,121 @@ export default function Home() {
     }
   };
 
+  const handleShare = async () => {
+    // 디버깅: 함수 호출 여부 확인
+    console.log("handleShare started, current shareCardRef:", shareCardRef.current);
+    
+    if (!shareCardRef.current || isSharing) {
+      console.warn("Share aborted: ref.current is null or already sharing");
+      return;
+    }
+    
+    setIsSharing(true);
+    try {
+      // 0.3초 대기하여 UI 정찰 및 Safari 렌더링 준비
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const shareTarget = shareCardRef.current;
+      
+      const canvas = await html2canvas(shareTarget, {
+        scale: 1.5, // 2 -> 1.5로 하향 (모바일 메모리 최적화)
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: '#0f172a',
+        logging: true // 오류 추적을 위해 로깅 활성화
+      });
+      
+      const imageData = canvas.toDataURL('image/png');
+      
+      if (!imageData || imageData === 'data:,') {
+        throw new Error("Canvas rendering failed");
+      }
+
+      const canUseShare = navigator.share && (
+        /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) // iPadOS용 체크 추가
+      );
+      
+      let sharedSuccessful = false;
+
+      if (canUseShare) {
+        try {
+          const byteString = atob(imageData.split(',')[1]);
+          const mimeString = imageData.split(',')[0].split(':')[1].split(';')[0];
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([ab], { type: mimeString });
+          const file = new File([blob], `reaction_results_${resultTime}ms.png`, { type: 'image/png' });
+          
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            const shareDescBase = t('shareDesc', { 
+              ms: resultTime, 
+              rank: myRank || '?', 
+              percentile: myRank ? Math.max(0.1, Math.round((myRank / totalPlayers) * 100 * 10) / 10) : '?'
+            });
+            
+            await navigator.share({
+              files: [file],
+              title: t('shareTitle'),
+              text: `${shareDescBase}\n${window.location.origin}`, // 텍스트에 링크 포함
+              // url 속성은 파일 공유와 충돌할 수 있어 제거
+            });
+            sharedSuccessful = true;
+          }
+        } catch (shareError) {
+          console.warn("Share API failed, falling back to download", shareError);
+        }
+      }
+
+      // 공유에 실패했거나 공유 기능이 없는 경우 다운로드 처리
+      if (!sharedSuccessful) {
+        const link = document.createElement('a');
+        link.href = imageData;
+        link.download = `reaction_results_${resultTime}ms.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (e) {
+      console.error("Capture failed:", e);
+      alert("이미지 생성에 실패했습니다. (캡처 도구 충돌 가능성)");
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   const handleViewResults = React.useCallback(async () => {
     const average = Math.round(trials.reduce((a, b) => a + b, 0) / 3);
     setResultTime(average);
     
-    showResultEffect(average, window.innerWidth/2, window.innerHeight/2);
+    // 랭킹 데이터는 항상 로드 (비로그인자도 전국 몇 위인지 알 수 있게)
+    setIsLoadingRank(true);
+    await fetchLeaderboard(average);
 
     if (user && user.displayName) {
       setShowLeaderboard(true);
-      setIsLoadingRank(true);
       await saveRecord(average);
-      await fetchLeaderboard(average);
     } else {
-      // Need nickname
+      // 닉네임 입력 모달 (로그인 유도)
       setShowNicknameModal(true);
     }
   }, [trials, user, saveRecord, fetchLeaderboard]);
+
+  // 리더보드 로드 및 모달 오픈 시 현재 기록 위치로 자동 스크롤
+  useEffect(() => {
+    if (showLeaderboard && !isLoadingRank && currentRankRef.current) {
+      const timer = setTimeout(() => {
+        currentRankRef.current.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center' 
+        });
+      }, 1000); // 700ms -> 1000ms로 상향 (안정성 확보)
+      return () => clearTimeout(timer);
+    }
+  }, [showLeaderboard, isLoadingRank, leaderboard]);
 
   const startNextRound = React.useCallback(() => {
     // 이전 라운드의 잔여 타이머 반드시 제거 (중복 발화 방지)
@@ -398,7 +523,7 @@ export default function Home() {
           )}
           {state === 'ready' && (
             <>
-              <h1>{t('action')}</h1>
+              <h1 style={{ fontSize: '4rem' }}>{t('action')}</h1>
               <p>Click now!</p>
             </>
           )}
@@ -409,16 +534,42 @@ export default function Home() {
               </div>
 
               <h1 style={{ marginTop: '1rem' }}>{t('result', { ms: resultTime })}</h1>
+              
               {isFinal ? (
-                <button
-                  className="view-results-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleViewResults();
-                  }}
-                >
-                  {t('viewResults')}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', width: '100%', maxWidth: '300px' }}>
+                  <button 
+                    className="view-results-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewResults();
+                    }}
+                    style={{ margin: 0, width: '100%' }}
+                  >
+                    {t('viewResults')}
+                  </button>
+                  
+                  {/* Share Card (Hidden from view using out-of-sight container) */}
+                    <div id="capture-container" style={{ 
+                      position: 'fixed', 
+                      top: '0', 
+                      left: '-9999px', // opacity 0 대신 화면 밖 전법 사용 (Safari 렌더링 강제)
+                      width: '540px',
+                      height: '540px',
+                      opacity: '1',
+                      pointerEvents: 'none',
+                      zIndex: '-1',
+                      overflow: 'hidden' 
+                    }}>
+                    <ShareCard 
+                      ref={shareCardRef}
+                      score={resultTime}
+                      rank={myRank || '-'}
+                      percentile={myRank && totalPlayers > 0 ? Math.max(0.1, Math.round((myRank / totalPlayers) * 100 * 10) / 10) : '-'}
+                      tier={currentTier}
+                      tierMsg={tierMessage}
+                    />
+                  </div>
+                </div>
               ) : (
                 <p>{t('clickToStart')}</p>
               )}
@@ -469,57 +620,143 @@ export default function Home() {
               <h3 className={`tier-text-${currentTier?.substring(1)}`}>
                 {t('averageResult', { ms: resultTime })}
               </h3>
-              {isLoadingRank ? (
-                <p>Loading Rank...</p>
-              ) : (
-                <>
               <p className="rank-text">
                 {myRank ? t('userRank', { rank: myRank, total: Math.max(totalPlayers, myRank) }) : t('loadingRank')}
               </p>
-                  {myRank && myRank <= 10 && (
-                    <p className="congrats-msg">{t('congratsTop10')}</p>
-                  )}
-                </>
+              {myRank && myRank <= 10 && (
+                <p className="congrats-msg">{t('congratsTop10')}</p>
+              )}
+              
+              {/* 리더보드 내 공유 버튼 */}
+              <div className="modal-share-container" style={{ marginTop: '1.2rem', width: '100%', display: 'flex', justifyContent: 'center' }}>
+                <button 
+                  className="share-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleShare();
+                  }}
+                  disabled={isSharing || isLoadingRank}
+                  style={{ width: '100%', maxWidth: '280px' }}
+                >
+                  {isSharing ? '생성 중...' : (isLoadingRank ? '순위 계산 중...' : (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: '18px', marginRight: '8px' }}>
+                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                        <polyline points="16 6 12 2 8 6" />
+                        <line x1="12" y1="2" x2="12" y2="15" />
+                      </svg>
+                      {t('shareResult')}
+                    </>
+                  ))}
+                </button>
+              </div>
+            </div>
+
+            {/* 테이블과 하단 버튼은 Summary 바깥에 배치하여 스크롤 및 레이아웃 정상화 */}
+            <div className="table-wrapper">
+              {isLoadingRank ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                  <p>{t('loadingRank')}</p>
+                </div>
+              ) : (
+                <table className="ranking-table">
+                  <thead>
+                    <tr>
+                      <th className="rank-col">{t('rank')}</th>
+                      <th className="name-col">{t('name')}</th>
+                      <th className="score-col">{t('score')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      // 1. 표시용 리스트 준비 (원본 보존을 위해 복사)
+                      let displayList = [...leaderboard].map((item, idx) => ({ ...item, realRank: idx + 1 }));
+                      
+                      // 2. 본인의 최고 기록 인덱스 찾기
+                      const myBestIndex = displayList.findIndex(e => user && e.uid === user.uid);
+                      
+                      // 3. 이번 기록(resultTime)이 리스트에 이미 있는지 확인 (점수까지 일치해야 함)
+                      const isCurrentInList = displayList.some(e => user && e.uid === user.uid && e.score === resultTime);
+
+                      // 4. 이번 기록이 100위 이내인데 리스트엔 없는 경우 (중복 유저 필터링 등으로 누락된 경우) 위치 찾아 삽입
+                      if (!isCurrentInList && user && myRank > 0 && myRank <= 100) {
+                        const currentEntry = {
+                          uid: user.uid,
+                          displayName: user.displayName || 'Me',
+                          score: resultTime,
+                          isCurrentAttempt: true,
+                          realRank: myRank
+                        };
+                        
+                        // 점수 순서에 맞게 삽입 위치 찾기
+                        const insertIndex = displayList.findIndex(e => e.score > resultTime);
+                        if (insertIndex === -1) {
+                          displayList.push(currentEntry);
+                        } else {
+                          displayList.splice(insertIndex, 0, currentEntry);
+                        }
+                      }
+
+                      return (
+                        <>
+                          {displayList.map((entry, index) => {
+                            const isUserAccount = user && entry.uid === user.uid;
+                            const isActualBest = isUserAccount && !entry.isCurrentAttempt && (entry.realRank === (myBestIndex + 1));
+                            const isCurrentAttempt = entry.isCurrentAttempt || (isUserAccount && entry.score === resultTime);
+                            
+                            return (
+                                <tr 
+                                  key={`${index}-${entry.score}`} 
+                                  ref={isCurrentAttempt ? currentRankRef : null}
+                                  className={`
+                                    ${isActualBest ? 'highlight-best' : ''} 
+                                    ${isCurrentAttempt ? 'highlight-current' : ''}
+                                  `}
+                                >
+                                <td className="rank-col">
+                                  {entry.realRank === 1 ? '🥇' : entry.realRank === 2 ? '🥈' : entry.realRank === 3 ? '🥉' : entry.realRank}
+                                </td>
+                                <td className="name-col">
+                                  <div className="name-wrapper">
+                                    {isCurrentAttempt && <span className="current-arrow">▶</span>}
+                                    <span className="player-name">{entry.displayName}</span>
+                                    {isActualBest && <span className="rank-badge badge-best">🏆 {t('best')}</span>}
+                                    {isCurrentAttempt && <span className="rank-badge badge-current">✨ {t('current')}</span>}
+                                  </div>
+                                </td>
+                                <td className="score-col">{entry.score} ms</td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* 100위 밖인 경우만 하단에 별도 표시 */}
+                          {user && myRank > 100 && !isCurrentInList && (
+                            <>
+                              <tr>
+                                <td colSpan="3" style={{ textAlign: 'center', opacity: 0.5, fontSize: '0.8rem', padding: '12px' }}>•••</td>
+                              </tr>
+                              <tr className="highlight-current" ref={currentRankRef}>
+                                <td className="rank-col">{myRank}</td>
+                                <td className="name-col">
+                                  <div className="name-wrapper">
+                                    <span className="current-arrow">▶</span>
+                                    <span className="player-name">{user.displayName || 'Me'}</span>
+                                    <span className="rank-badge badge-current">✨ {t('current')}</span>
+                                  </div>
+                                </td>
+                                <td className="score-col">{resultTime} ms</td>
+                              </tr>
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </tbody>
+                </table>
               )}
             </div>
 
-            <div className="table-wrapper">
-              <table className="ranking-table">
-                <thead>
-                  <tr>
-                    <th>{t('rank')}</th>
-                    <th>{t('name')}</th>
-                    <th>{t('score')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaderboard.map((entry, index) => (
-                    <tr key={index} className={user && entry.uid === user.uid ? 'highlight' : ''}>
-                      <td>{index + 1}</td>
-                      <td>{entry.displayName}</td>
-                      <td>{entry.score} ms</td>
-                    </tr>
-                  ))}
-                  
-                  {user && myRank > 0 && !leaderboard.some(e => e.uid === user.uid) && (
-                    <>
-                      {myRank > leaderboard.length + 1 && (
-                        <tr>
-                          <td colSpan="3" style={{ textAlign: 'center', opacity: 0.5, fontSize: '0.8rem' }}>•••</td>
-                        </tr>
-                      )}
-                      <tr className="highlight">
-                        <td>{myRank}</td>
-                        <td>{user.displayName || 'Me'}</td>
-                        <td>{resultTime} ms</td>
-                      </tr>
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <button className="retry-btn" onClick={resetTest}>
+            <button className="retry-btn" onClick={resetTest} style={{ width: '100%', marginBottom: '0' }}>
               {t('retry')}
             </button>
           </div>
@@ -532,12 +769,34 @@ export default function Home() {
           <div className="full-ranking-content glass" onClick={(e) => e.stopPropagation()}>
             {/* 헤더 */}
             <div className="full-ranking-header">
-              <div>
+              <div style={{ flex: 1 }}>
                 <h2>🏆 {t('fullRanking')}</h2>
                 <p className="full-ranking-subtitle">{t('fullRankingSubtitle')}</p>
               </div>
               <button className="full-ranking-close-btn" onClick={handleCloseFullRanking}>
                 ✕
+              </button>
+            </div>
+
+            {/* 디바이스 탭 메뉴 */}
+            <div className="ranking-tabs">
+              <button 
+                className={`tab-btn ${deviceTab === 'all' ? 'active' : ''}`} 
+                onClick={(e) => { e.stopPropagation(); setDeviceTab('all'); }}
+              >
+                {t('tab_all')}
+              </button>
+              <button 
+                className={`tab-btn ${deviceTab === 'mobile' ? 'active' : ''}`} 
+                onClick={(e) => { e.stopPropagation(); setDeviceTab('mobile'); }}
+              >
+                {t('tab_mobile')}
+              </button>
+              <button 
+                className={`tab-btn ${deviceTab === 'desktop' ? 'active' : ''}`} 
+                onClick={(e) => { e.stopPropagation(); setDeviceTab('desktop'); }}
+              >
+                {t('tab_desktop')}
               </button>
             </div>
 
@@ -562,26 +821,36 @@ export default function Home() {
                 <table className="ranking-table full-ranking-table">
                   <thead>
                     <tr>
-                      <th style={{ width: '60px' }}>{t('rank')}</th>
-                      <th>{t('name')}</th>
-                      <th style={{ width: '100px', textAlign: 'right' }}>{t('score')}</th>
+                      <th className="rank-col">{t('rank')}</th>
+                      <th className="name-col">{t('name')}</th>
+                      <th className="device-col">기기</th>
+                      <th className="score-col">{t('score')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {fullRankingList.map((entry, index) => (
-                      <tr
-                        key={index}
-                        className={`full-ranking-row ${index === 0 ? 'rank-gold' : ''} ${index === 1 ? 'rank-silver' : ''} ${index === 2 ? 'rank-bronze' : ''} ${user && entry.uid === user.uid ? 'highlight' : ''}`}
-                      >
-                        <td>
-                          <span className="full-rank-badge">
+                    {fullRankingList.length > 0 ? (
+                      fullRankingList.map((entry, index) => (
+                        <tr 
+                          key={index} 
+                          className={`full-ranking-row ${entry.uid === user?.uid ? 'highlight' : ''}`}
+                        >
+                          <td className="rank-col">
                             {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
-                          </span>
+                          </td>
+                          <td className="full-rank-name">{entry.displayName}</td>
+                          <td className="device-col">
+                            {entry.device === 'desktop' ? '💻 PC' : entry.device === 'mobile' ? '📱 Mobile' : '—'}
+                          </td>
+                          <td className="full-rank-score">{entry.score} ms</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="4" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                          데이터가 없습니다.
                         </td>
-                        <td className="full-rank-name">{entry.displayName}</td>
-                        <td className="full-rank-score">{entry.score} ms</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               )}
